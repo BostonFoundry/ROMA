@@ -100,7 +100,53 @@ class EpisodeBatch:
                 raise KeyError("{} not found in transition or episode data".format(k))
 
             dtype = self.scheme[k].get("dtype", th.float32)
-            v = th.tensor(v, dtype=dtype, device=self.device)
+            # v = th.tensor(v, dtype=dtype, device=self.device)
+            debug = False
+            if isinstance(v, list):
+                if debug:
+                    print(f"[DEBUG] v is a list. Length: {len(v)}")
+                    for i, element in enumerate(v[:5]):  # Show the first 5 elements for debugging
+                        print(f"[DEBUG] Element {i}: Type: {type(element)}, Value: {element}")
+
+                if len(v) == 1 and isinstance(v[0], list) and all(isinstance(x, np.ndarray) for x in v[0]):
+                    # Flatten the outer list and combine inner NumPy arrays
+                    v = np.stack(v[0])  # Combine list of NumPy arrays into a single 2D NumPy array
+                    if debug:
+                        print(f"[DEBUG] Flattened outer list and stacked inner arrays. New type: {type(v)}, Shape: {v.shape}")
+                elif all(isinstance(x, np.ndarray) for x in v):
+                    v = np.array(v)  # Convert list of NumPy arrays to a single NumPy array
+                    if debug:
+                        print(f"[DEBUG] Converted list of NumPy arrays to a single NumPy array. New type: {type(v)}, Shape: {v.shape}")
+                elif all(isinstance(x, th.Tensor) for x in v):
+                    v = th.stack(v)  # Stack the list of tensors into a single tensor
+                    if debug:
+                        print(f"[DEBUG] Stacked list of tensors. New type: {type(v)}, Shape: {v.shape}")
+                else:
+                    if debug:
+                        print("[DEBUG] Mixed or unsupported types in the list. Handling manually.")
+
+            if isinstance(v, th.Tensor):
+                if debug:
+                    print(f"[DEBUG] v is already a tensor. Device: {v.device}, Shape: {v.shape}")
+                v = v.clone().detach()  # Properly handle existing tensors
+            else:
+                if debug:
+                    print(f"[DEBUG] Else block reached. Type: {type(v)}, Shape: {getattr(v, 'shape', 'N/A')}")
+                if not isinstance(v, th.Tensor):
+                    # print("Last ditch attempt.  We tried to convert to np.array.")
+                    if isinstance(v, list) and all(isinstance(x, np.ndarray) for x in v):
+                        v = np.array(v)  # Convert list of arrays to one ndarray
+                    v = th.tensor(v, dtype=dtype, device=self.device)
+                if debug:
+                    print(f"[DEBUG] Converted to tensor. Type: {type(v)}, Device: {v.device}, Shape: {v.shape}")
+
+            # Pause here for debugging
+            if debug:
+                input("[DEBUG] Press Enter to continue to the next instance...")
+
+            # original code:
+            # v = th.tensor(v, dtype=dtype, device=self.device)
+
             self._check_safe_view(v, target[k][_slices])
             target[k][_slices] = v.view_as(target[k][_slices])
 

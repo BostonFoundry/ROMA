@@ -1,6 +1,7 @@
 from collections import defaultdict
 import logging
 import numpy as np
+import torch
 
 class Logger:
     def __init__(self, console_logger):
@@ -45,6 +46,18 @@ class Logger:
             self.writer.add_embedding(mat,metadata,global_step=global_step,tag=tag)
 
     def print_recent_stats(self):
+        #mshiffer 11/17
+        if "episode" not in self.stats or len(self.stats["episode"]) == 0:
+            log_str = "Recent Stats (no episode info)\n"
+            for k, values in self.stats.items():
+                if not values:
+                    continue
+                t_env, v = values[-1]
+                log_str += f"{k}: {v:.4f} @ t_env {t_env}\n"
+            self.console_logger.info(log_str)
+            return
+        #####
+        
         log_str = "Recent Stats | t_env: {:>10} | Episode: {:>8}\n".format(*self.stats["episode"][-1])
         i = 0
         for (k, v) in sorted(self.stats.items()):
@@ -52,7 +65,8 @@ class Logger:
                 continue
             i += 1
             window = 5 if k != "epsilon" else 1
-            item = "{:.4f}".format(np.mean([x[1] for x in self.stats[k][-window:]]))
+            item = "{:.4f}".format(np.mean([x[1].cpu().numpy() if isinstance(x[1], torch.Tensor) else x[1] for x in self.stats[k][-window:]]))
+            #item = "{:.4f}".format(np.mean([x[1] for x in self.stats[k][-window:]]))
             log_str += "{:<25}{:>8}".format(k + ":", item)
             log_str += "\n" if i % 4 == 0 else "\t"
         self.console_logger.info(log_str)

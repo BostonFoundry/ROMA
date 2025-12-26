@@ -1,1 +1,1 @@
-from .gfootball import GF as GoogleFootballEnv
+# from .gfootball import GF as GoogleFootballEnv
