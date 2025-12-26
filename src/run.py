@@ -77,15 +77,25 @@ def evaluate_sequential(args, runner):
     runner.close_env()
 
 def run_sequential(args, logger):
+    ################################################################################
+    # TODO This is the key - upping the number of agents to a larger number with no
+    # change in learning
+    
+
+    # args.n_agents = 7
+    ################################################################################
 
     # Init runner so we can get env info
     runner = r_REGISTRY[args.runner](args=args, logger=logger)
 
     # Set up schemes and groups here
     env_info = runner.get_env_info()
+
     args.n_agents = env_info["n_agents"]
     args.n_actions = env_info["n_actions"]
     args.state_shape = env_info["state_shape"]
+
+    assert env_info["n_agents"] > 0, "Env reports 0 agents for this map/config."
 
 #    args.own_feature_size = env_info["own_feature_size"] #unit_type_bits+shield_bits_ally
     #if args.obs_last_action:
@@ -101,6 +111,8 @@ def run_sequential(args, logger):
         "avail_actions": {"vshape": (env_info["n_actions"],), "group": "agents", "dtype": th.int},
         "reward": {"vshape": (1,)},
         "terminated": {"vshape": (1,), "dtype": th.uint8},
+        # mshiffer UPDATE -- use the mask to get real number of agents
+        "agent_mask": {"vshape": (1,), "dtype": th.float32, "group": "agents"},
     }
     groups = {
         "agents": args.n_agents
@@ -154,7 +166,9 @@ def run_sequential(args, logger):
         learner.load_models(model_path)
         runner.t_env = timestep_to_load
 
-        if args.evaluate or args.save_replay:
+        # mshiffer - don't do this if we're just saving replay later 
+        #if args.evaluate or args.save_replay:
+        if args.evaluate:
             evaluate_sequential(args, runner)
             return
 
@@ -218,6 +232,9 @@ def run_sequential(args, logger):
             logger.print_recent_stats()
             last_log_T = runner.t_env
 
+    if args.save_replay:
+        runner.save_replay()
+        print("Replay Saved")
     runner.close_env()
     logger.console_logger.info("Finished Training")
 
