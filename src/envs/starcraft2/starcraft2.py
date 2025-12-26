@@ -328,10 +328,10 @@ class StarCraft2Env(MultiAgentEnv):
                 self.map_x, int(self.map_y / 8))
             self.pathing_grid = np.transpose(np.array([
                 [(b >> i) & 1 for b in row for i in range(7, -1, -1)]
-                for row in vals], dtype=np.bool))
+                for row in vals], dtype=bool))
         else:
             self.pathing_grid = np.invert(np.flip(np.transpose(np.array(
-                list(map_info.pathing_grid.data), dtype=np.bool).reshape(
+                list(map_info.pathing_grid.data), dtype=bool).reshape(
                 self.map_x, self.map_y)), axis=1))
 
         self.terrain_height = np.flip(
@@ -1166,10 +1166,10 @@ class StarCraft2Env(MultiAgentEnv):
             if self.map_type == "stalkers_and_zealots":
                 # id(Stalker) = 74, id(Zealot) = 73
                 type_id = unit.unit_type - 73
-            if self.map_type == "bane_vs_sz":
+            elif self.map_type == "bane_vs_sz":
                 # id(Stalker) = 74, id(Zealot) = 73
                 type_id = unit.unit_type - 73
-            if self.map_type == "stalkers_and_zealots_vs_zb":
+            elif self.map_type == "stalkers_and_zealots_vs_zb":
                 # id(Stalker) = 74, id() =
                 if unit.unit_type == 9:
                     type_id = 0
@@ -1216,6 +1216,30 @@ class StarCraft2Env(MultiAgentEnv):
                     type_id = 2
                 else:
                     type_id = 3
+            elif self.map_type == "new_map":
+                if unit.unit_type == 51:
+                    type_id = 0
+                elif unit.unit_type == 48:
+                    type_id = 1
+                elif unit.unit_type == 54:
+                    type_id = 2
+                elif unit.unit_type == 50:
+                    type_id = 3
+                elif unit.unit_type == 49:
+                    type_id = 4
+            elif self.map_type == "new_map_H":
+                if unit.unit_type == 51:
+                    type_id = 0
+                elif unit.unit_type == 48:
+                    type_id = 1
+                elif unit.unit_type == 53:
+                    type_id = 2
+                elif unit.unit_type == 50:
+                    type_id = 3
+                elif unit.unit_type == 49:
+                    type_id = 4              
+            else:
+                raise ValueError(f"Unhandled map_type '{self.map_type}' or unknown unit_type: {unit.unit_type}")
 
         return type_id
 
@@ -1337,6 +1361,48 @@ class StarCraft2Env(MultiAgentEnv):
                     unit.unit_type for unit in self.agents.values()
                 )
                 self._init_ally_unit_types(min_unit_type)
+
+ ############################### HACK ################################################
+ # 
+            # # If SC2 spawned fewer ally units than expected, pad with dummy dead units
+            # if len(self.agents) < self.n_agents:
+            #     missing = self.n_agents - len(self.agents)
+
+            #     # Use last real unit as a template
+            #     template = None
+            #     if len(ally_units_sorted) > 0:
+            #         template = ally_units_sorted[-1]
+
+            #     for k in range(len(self.agents), self.n_agents):
+            #         if template is None:
+            #             break  # can't pad if SC2 gave nothing
+            #         dummy = deepcopy(template)
+            #         dummy.health = 0
+            #         dummy.shield = 0
+            #         dummy.weapon_cooldown = 0
+            #         dummy.energy = 0
+            #         self.agents[k] = dummy
+
+            # # Same for enemies if you ever run mismatched-enemy maps
+            # if len(self.enemies) < self.n_enemies:
+            #     missing_e = self.n_enemies - len(self.enemies)
+            #     # Use first enemy unit (or ally template as fallback)
+            #     template_e = None
+            #     if len(self.enemies) > 0:
+            #         template_e = list(self.enemies.values())[-1]
+            #     elif len(ally_units_sorted) > 0:
+            #         template_e = ally_units_sorted[-1]
+
+            #     for k in range(len(self.enemies), self.n_enemies):
+            #         if template_e is None:
+            #             break
+            #         dummy_e = deepcopy(template_e)
+            #         dummy_e.health = 0
+            #         dummy_e.shield = 0
+            #         dummy_e.weapon_cooldown = 0
+            #         dummy_e.energy = 0
+            #         self.enemies[k] = dummy_e
+ ############################# END HACK ##############################################              
 
             all_agents_created = (len(self.agents) == self.n_agents)
             all_enemies_created = (len(self.enemies) == self.n_enemies)
@@ -1470,6 +1536,7 @@ class StarCraft2Env(MultiAgentEnv):
 
     def get_unit_by_id(self, a_id):
         """Get unit by ID."""
+        # print(f'get_unit_by_id id:{a_id} agents:{self.agents}')
         return self.agents[a_id]
 
     def get_stats(self):
