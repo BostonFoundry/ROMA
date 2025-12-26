@@ -7,7 +7,7 @@ epsilon_finish: 0.05
 epsilon_anneal_time: 50
 
 runner: "parallel"
-batch_size_run: 8
+batch_size_run: 60
 
 buffer_size: 5000
 
@@ -29,8 +29,10 @@ mac: "separate_mac"
 
 latent_dim: 3
 kl_loss_weight: 0.0001
-h_loss_weight: 0.0001
-var_floor: 0.002
+# h_loss_weight: 0.0001
+# var_floor: 0.002
+h_loss_weight: 0.05
+var_floor: 0.0001
 NN_HIDDEN_SIZE: 16
 dis_loss_weight: 0.001
 dis_time: 0
@@ -45,4 +47,4 @@ use_tensorboard: True
 save_model: True
 use_cuda: False
 device_num: 0
-save_replay: False
+save_replay: True
