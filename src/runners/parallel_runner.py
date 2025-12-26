@@ -18,8 +18,29 @@ class ParallelRunner:
         # Make subprocesses for the envs
         self.parent_conns, self.worker_conns = zip(*[Pipe() for _ in range(self.batch_size)])
         env_fn = env_REGISTRY[self.args.env]
-        self.ps = [Process(target=env_worker, args=(worker_conn, CloudpickleWrapper(partial(env_fn, **self.args.env_args))))
-                            for worker_conn in self.worker_conns]
+        # self.ps = [Process(target=env_worker, args=(worker_conn, CloudpickleWrapper(partial(env_fn, **self.args.env_args))))
+        #                     for worker_conn in self.worker_conns]
+
+        # TODO get this from config
+        # task_maps = ['MMMRG1', 'MMMRG2', 'MMMRG3', 'MMMRG4', 'MMMRG5']
+        #task_maps = ['S0Z7','S1Z6','S2Z5','S3Z4','S4Z3','S5Z2', 'S6Z1', 'S7Z0']
+        # maps with hold back in center
+        task_maps = ['S0Z7','S1Z6','S2Z5','S5Z2', 'S6Z1', 'S7Z0']
+        #task_maps = ['S3Z4']
+        #task_maps = ['S4Z3']
+        #task_maps = ['new_map_H1', 'new_map_H2', 'new_map_H3', 'new_map_H4', 'new_map_H5']
+        print(f'Running the following maps: {task_maps}')
+
+        self.n_tasks = len(task_maps)
+        self.ps = []
+
+        for i, worker_conn in enumerate(self.worker_conns):
+            env_args = self.args.env_args.copy()
+            env_args["map_name"] = task_maps[i % self.n_tasks]
+            self.ps.append(Process(
+                target=env_worker,
+                args=(worker_conn, CloudpickleWrapper(partial(env_fn, **env_args)))
+            ))
 
         for p in self.ps:
             p.daemon = True
@@ -52,7 +73,9 @@ class ParallelRunner:
         return self.env_info
 
     def save_replay(self):
-        pass
+        # mshiffer - only saving from first environment
+        self.parent_conns[0].send(("save_replay", None))
+        self.parent_conns[0].recv()
 
     def close_env(self):
         for parent_conn in self.parent_conns:
@@ -68,14 +91,45 @@ class ParallelRunner:
         pre_transition_data = {
             "state": [],
             "avail_actions": [],
-            "obs": []
+            "obs": [],
+            "agent_mask": []
         }
+
         # Get the obs, state and avail_actions back
         for parent_conn in self.parent_conns:
             data = parent_conn.recv()
+            # used to build mask
+            n_agents = len(data["obs"])
+            # used to pad with zeros
+            max_agents = self.args.n_agents
+
+            # # to be used to pad (maybe do zeros like)
+            obs_dim = len(data["obs"][0])
+            action_dim = len(data["avail_actions"][0])
+
+            # # Pad obs
+            obs = np.zeros((max_agents, obs_dim), dtype=np.float32)
+            obs[:n_agents] = np.array(data["obs"])
+
+            # # Pad avail_actions
+            avail_actions = np.zeros((max_agents, action_dim), dtype=np.float32)
+            avail_actions[:n_agents] = np.array(data["avail_actions"])
+
+            # Pad agent_mask
+            agent_mask = np.zeros((max_agents), dtype=np.float32)
+            agent_mask[:n_agents] = 1.0
+
+            # TODO Need to update the appends here
             pre_transition_data["state"].append(data["state"])
-            pre_transition_data["avail_actions"].append(data["avail_actions"])
-            pre_transition_data["obs"].append(data["obs"])
+            pre_transition_data["avail_actions"].append(avail_actions)
+            pre_transition_data["obs"].append(obs)
+            pre_transition_data["agent_mask"].append(agent_mask)
+
+            # print(f'DEBUG shape of obs {data["obs"]}')
+            # print(f'DEBUG shape of avail_actions {data["avail_actions"]}')
+            # print(f'DEBUG shape of state {data["state"]}')
+            # print(f'DEBUG shape of agent_mask {agent_mask}')
+
 
         self.batch.update(pre_transition_data, ts=0)
 
@@ -95,6 +149,10 @@ class ParallelRunner:
         envs_not_terminated = [b_idx for b_idx, termed in enumerate(terminated) if not termed]
         final_env_infos = []  # may store extra stats like battle won. this is filled in ORDER OF TERMINATION
 
+        # Calculate num_agents per episode here
+        agent_mask = self.batch['agent_mask'][:, 0, :]
+        n_agents_per_env = agent_mask.sum(dim=1).squeeze(-1).to(th.int)
+
         while True:
 
             # Pass the entire batch of experiences up till now to the agents
@@ -113,7 +171,8 @@ class ParallelRunner:
             for idx, parent_conn in enumerate(self.parent_conns):
                 if idx in envs_not_terminated: # We produced actions for this env
                     if not terminated[idx]: # Only send the actions to the env if it hasn't terminated
-                        parent_conn.send(("step", cpu_actions[action_idx]))
+                        # mshiffer Updated to only send actions for n_agents in this episode
+                        parent_conn.send(("step", cpu_actions[action_idx][:(n_agents_per_env[idx].item())]))
                     action_idx += 1 # actions is not a list over every env
 
             # Update envs_not_terminated
@@ -131,7 +190,8 @@ class ParallelRunner:
             pre_transition_data = {
                 "state": [],
                 "avail_actions": [],
-                "obs": []
+                "obs": [], 
+                "agent_mask": []
             }
 
             # Receive data back for each unterminated env
@@ -154,10 +214,32 @@ class ParallelRunner:
                     terminated[idx] = data["terminated"]
                     post_transition_data["terminated"].append((env_terminated,))
 
+                    n_agents = len(data["obs"])
+                    # used to pad with zeros
+                    max_agents = self.args.n_agents
+
+                    # # to be used to pad (maybe do zeros like)
+                    obs_dim = len(data["obs"][0])
+                    action_dim = len(data["avail_actions"][0])
+
+                    # # Pad obs
+                    obs = np.zeros((max_agents, obs_dim), dtype=np.float32)
+                    obs[:n_agents] = np.array(data["obs"])
+
+                    # # Pad avail_actions
+                    avail_actions = np.zeros((max_agents, action_dim), dtype=np.float32)
+                    avail_actions[:n_agents] = np.array(data["avail_actions"])
+
+                    # Pad agent_mask
+                    agent_mask = np.zeros((max_agents), dtype=np.float32)
+                    agent_mask[:n_agents] = 1.0
+
+                    #TODO need to update appends to use the above padded versions
                     # Data for the next timestep needed to select an action
                     pre_transition_data["state"].append(data["state"])
-                    pre_transition_data["avail_actions"].append(data["avail_actions"])
-                    pre_transition_data["obs"].append(data["obs"])
+                    pre_transition_data["avail_actions"].append(avail_actions)
+                    pre_transition_data["obs"].append(obs)
+                    pre_transition_data["agent_mask"].append(agent_mask)
 
             # Add post_transiton data into the batch
             self.batch.update(post_transition_data, bs=envs_not_terminated, ts=self.t, mark_filled=False)
@@ -193,6 +275,8 @@ class ParallelRunner:
         n_test_runs = max(1, self.args.test_nepisode // self.batch_size) * self.batch_size
         if test_mode and (len(self.test_returns) == n_test_runs):
             self._log(cur_returns, cur_stats, log_prefix)
+            #mshiffer 11/17
+            self.logger.print_recent_stats()
         elif self.t_env - self.log_train_stats_t >= self.args.runner_log_interval:
             self._log(cur_returns, cur_stats, log_prefix)
             if hasattr(self.mac.action_selector, "epsilon"):
@@ -250,8 +334,10 @@ def env_worker(remote, env_fn):
             remote.send(env.get_env_info())
         elif cmd == "get_stats":
             remote.send(env.get_stats())
+        elif cmd == "save_replay":
+            remote.send(env.save_replay())
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f'{cmd}')
 
 
 class CloudpickleWrapper():
